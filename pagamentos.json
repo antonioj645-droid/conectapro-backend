@@ -1,0 +1,22 @@
+[
+  {
+    "paymentId": "real001",
+    "valor": 50,
+    "data": "2026-06-04T15:07:54.546Z"
+  },
+  {
+    "paymentId": "testeFirebase",
+    "valor": 999,
+    "data": "2026-06-04T15:11:03.751Z"
+  },
+  {
+    "paymentId": "firebaseFINAL",
+    "valor": 500,
+    "data": "2026-06-04T15:12:32.612Z"
+  },
+  {
+    "paymentId": "ULTIMO_TESTE_REAL",
+    "valor": 200,
+    "data": "2026-06-04T15:32:06.262Z"
+  }
+]
