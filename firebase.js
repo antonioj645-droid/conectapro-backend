@@ -1,20 +1,25 @@
 const admin = require("firebase-admin");
-const fs = require("fs");
-const path = require("path");
 
-// Caminho seguro do arquivo
-const serviceAccountPath = path.join(__dirname, "serviceAccountKey.json");
+let serviceAccount;
 
-// Verifica se o arquivo existe
-if (!fs.existsSync(serviceAccountPath)) {
-  console.error("❌ serviceAccountKey.json não encontrado!");
+try {
+  if (!process.env.FIREBASE_KEY) {
+    throw new Error("Variável FIREBASE_KEY não encontrada.");
+  }
+
+  serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
+
+  if (!admin.apps.length) {
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+    });
+  }
+
+  console.log("✅ Firebase conectado com sucesso");
+} catch (error) {
+  console.error("❌ Erro ao iniciar Firebase:", error.message);
+  process.exit(1);
 }
-
-const serviceAccount = require(serviceAccountPath);
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
 
 const db = admin.firestore();
 
