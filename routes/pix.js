@@ -1,195 +1,213 @@
+"use strict";
+
 const express = require("express");
 const axios = require("axios");
-const db = require("../firebase");
 
 const router = express.Router();
 
+// ✅ PRODUÇÃO (CORRIGIDO)
+const ASAAS_BASE_URL =
+  process.env.ASAAS_BASE_URL ?? "https://api.asaas.com/v3";
+
 const ASAAS_API_KEY = process.env.ASAAS_API_KEY;
 
-if (!ASAAS_API_KEY) {
-  console.error("❌ ASAAS_API_KEY não configurada.");
-}
-
-// Configuração Asaas
-const api = axios.create({
-  baseURL: "https://sandbox.asaas.com/api/v3",
+const asaas = axios.create({
+  baseURL: ASAAS_BASE_URL,
   headers: {
-    accept: "application/json",
     "Content-Type": "application/json",
     access_token: ASAAS_API_KEY,
   },
 });
 
-// =================================
-// CRIAR PIX
-// =================================
-router.post("/criar-pix", async (req, res) => {
-  try {
-    const { valor, nome, email } = req.body;
+// ================================
+// HELPERS
+// ================================
 
-    if (!valor || !nome || !email) {
-      return res.status(400).json({
-        success: false,
-        error: "Informe valor, nome e email",
-      });
-    }
+function hoje() {
+  return new Date().toISOString().split("T")[0];
+}
 
-    // Criar cliente
-    const cliente = await api.post("/customers", {
-      name: nome,
-      email: email,
-    });
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-    // Criar cobrança PIX
-    const pagamento = await api.post("/payments", {
-      customer: cliente.data.id,
-      billingType: "PIX",
-      value: parseFloat(valor),
-      dueDate: new Date().toISOString().split("T")[0],
-    });
+// 🔥 BUSCAR QR COM DEBUG
+async function buscarQr(paymentId) {
 
-    // Buscar QRCode
-    const pix = await api.get(
-      `/payments/${pagamento.data.id}/pixQrCode`
-    );
+  for (let i = 0; i < 20; i++) {
 
-    return res.status(200).json({
-      success: true,
-      paymentId: pagamento.data.id,
-      status: pagamento.data.status,
-      pixCopiaECola: pix.data.payload,
-      qrCodeBase64: pix.data.encodedImage,
-    });
+    try {
 
-  } catch (error) {
-    console.error(
-      "❌ Erro criar PIX:",
-      error.response?.data || error.message
-    );
+      const { data } =
+        await asaas.get(`/payments/${paymentId}/pixQrCode`);
 
-    return res.status(500).json({
-      success: false,
-      error: error.response?.data || error.message,
-    });
-  }
-});
+      console.log("=== QR RESPONSE ===");
+      console.log(JSON.stringify(data, null, 2));
 
-// =================================
-// VERIFICAR PAGAMENTO
-// =================================
-router.get("/verificar-pagamento/:id", async (req, res) => {
-  try {
-    const response = await api.get(
-      `/payments/${req.params.id}`
-    );
+      if (data?.encodedImage) {
+        console.log(`✅ QR pronto (${i + 1})`);
 
-    return res.json({
-      success: true,
-      paymentId: response.data.id,
-      status: response.data.status,
-      value: response.data.value,
-    });
+        return {
+          encodedImage: data.encodedImage,
+          payload: data.payload,
+        };
+      }
 
-  } catch (error) {
-    console.error(
-      "❌ Erro verificar:",
-      error.response?.data || error.message
-    );
+      console.log(`⏳ aguardando QR... (${i + 1})`);
 
-    return res.status(500).json({
-      success: false,
-      error: error.response?.data || error.message,
-    });
-  }
-});
-
-// =================================
-// CONFIRMAR PAGAMENTO
-// =================================
-router.post("/confirmar-pagamento", async (req, res) => {
-  try {
-    const { paymentId, valor } = req.body;
-
-    if (!paymentId || !valor) {
-      return res.status(400).json({
-        success: false,
-        error: "paymentId e valor são obrigatórios",
-      });
-    }
-
-    const pagamentoRef =
-      db.collection("pagamentos").doc(paymentId);
-
-    const pagamentoDoc =
-      await pagamentoRef.get();
-
-    if (!pagamentoDoc.exists) {
-      await pagamentoRef.set({
-        paymentId,
-        valor,
-        status: "CONFIRMADO",
-        criadoEm: new Date().toISOString(),
-      });
-
+    } catch (e) {
       console.log(
-        `✅ Pagamento salvo: ${paymentId}`
+        "❌ erro QR:",
+        e.response?.data || e.message
       );
     }
 
-    return res.json({
-      success: true,
-      message: "Pagamento registrado",
-    });
-
-  } catch (error) {
-    console.error("❌ Firebase:", error);
-
-    return res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    await sleep(1500);
   }
-});
 
-// =================================
-// LISTAR PAGAMENTOS
-// =================================
-router.get("/pagamentos", async (req, res) => {
-  try {
-    const snapshot =
-      await db.collection("pagamentos").get();
+  console.log("⚠️ QR não ficou pronto");
 
-    const pagamentos = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+  return null;
+}
 
-    return res.json({
-      success: true,
-      total: pagamentos.length,
-      pagamentos,
-    });
+// CLIENTE
+async function getCliente(nome, email) {
 
-  } catch (error) {
-    console.error(error);
-
-    return res.status(500).json({
-      success: false,
-      error: error.message,
-    });
-  }
-});
-
-// =================================
-// STATUS
-// =================================
-router.get("/status", (req, res) => {
-  res.json({
-    online: true,
-    servidor: "ConectaPro Backend",
-    ambiente: "Render",
-    data: new Date().toISOString(),
+  const { data } = await asaas.get("/customers", {
+    params: { email },
   });
+
+  if (data.data.length > 0) {
+    return data.data[0].id;
+  }
+
+  const novo = await asaas.post("/customers", {
+    name: nome,
+    email,
+  });
+
+  return novo.data.id;
+}
+
+// ================================
+// CRIAR PIX
+// ================================
+
+router.post("/criar-pix", async (req, res) => {
+
+  const { valor, nome, email } = req.body;
+
+  try {
+
+    const cliente = await getCliente(nome, email);
+
+    const response = await asaas.post("/payments", {
+      customer: cliente,
+      billingType: "PIX",
+      value: Number(valor),
+      dueDate: hoje(),
+    });
+
+    const paymentId = response.data.id;
+
+    console.log("✅ PIX criado:", paymentId);
+
+    let qr = null;
+
+    try {
+      qr = await buscarQr(paymentId);
+    } catch (e) {
+      console.log("⚠️ erro ao buscar QR");
+    }
+
+    return res.json({
+      success: true,
+      paymentId,
+      pixCopiaECola: qr?.payload ?? "",
+      qrCodeBase64: qr?.encodedImage
+        ? `data:image/png;base64,${qr.encodedImage}`
+        : "",
+      qrDisponivel: !!qr,
+    });
+
+  } catch (error) {
+
+    console.error(
+      "❌ ERRO PIX:",
+      error.response?.data || error.message
+    );
+
+    return res.status(500).json({
+      success: false,
+      error: error.response?.data || error.message,
+    });
+  }
+});
+
+// ================================
+// BUSCAR QR SEPARADO
+// ================================
+
+router.get("/pix-qrcode/:id", async (req, res) => {
+
+  try {
+
+    const qr = await buscarQr(req.params.id);
+
+    if (!qr) {
+      return res.json({
+        success: false,
+        qrCodeBase64: "",
+        pixCopiaECola: "",
+      });
+    }
+
+    return res.json({
+      success: true,
+      qrCodeBase64: `data:image/png;base64,${qr.encodedImage}`,
+      pixCopiaECola: qr.payload,
+    });
+
+  } catch (error) {
+
+    console.error(
+      "❌ ERRO QR:",
+      error.response?.data || error.message
+    );
+
+    return res.status(500).json({
+      success: false,
+    });
+  }
+});
+
+// ================================
+// VERIFICAR STATUS
+// ================================
+
+router.get("/verificar-pagamento/:id", async (req, res) => {
+
+  try {
+
+    const { data } =
+      await asaas.get(`/payments/${req.params.id}`);
+
+    return res.json({
+      success: true,
+      status: data.status,
+    });
+
+  } catch (error) {
+
+    console.error(
+      "Erro verificar:",
+      error.response?.data || error.message
+    );
+
+    return res.json({
+      success: false,
+    });
+  }
 });
 
 module.exports = router;

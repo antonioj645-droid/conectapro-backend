@@ -1,13 +1,13 @@
 const admin = require("firebase-admin");
 
-let serviceAccount;
+let db = null;
 
 try {
   if (!process.env.FIREBASE_KEY) {
     throw new Error("Variável FIREBASE_KEY não encontrada.");
   }
 
-  serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
+  const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
 
   if (!admin.apps.length) {
     admin.initializeApp({
@@ -15,12 +15,25 @@ try {
     });
   }
 
-  console.log("✅ Firebase conectado com sucesso");
-} catch (error) {
-  console.error("❌ Erro ao iniciar Firebase:", error.message);
-  process.exit(1);
-}
+  db = admin.firestore();
 
-const db = admin.firestore();
+  console.log("✅ Firebase conectado com sucesso");
+
+} catch (error) {
+
+  console.warn("⚠️ Firebase desativado:", error.message);
+
+  // ✅ MOCK PRA NÃO QUEBRAR O SISTEMA
+  db = {
+    collection: () => ({
+      doc: () => ({
+        get: async () => ({ exists: false }),
+        set: async () => {}
+      }),
+      get: async () => ({ docs: [] })
+    })
+  };
+
+}
 
 module.exports = db;

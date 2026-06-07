@@ -6,7 +6,6 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
 class PixDialog extends StatefulWidget {
-
   final double valor;
 
   const PixDialog({
@@ -21,410 +20,271 @@ class PixDialog extends StatefulWidget {
 class _PixDialogState extends State<PixDialog> {
 
   bool loading = true;
-
   bool pagamentoConfirmado = false;
 
   String pixCopiaCola = '';
-
   String paymentId = '';
 
   Uint8List? qrCodeImage;
 
+  static const String baseUrl =
+      'https://conectapro-backend-1.onrender.com';
+
   @override
   void initState() {
     super.initState();
-
     gerarPix();
   }
 
-  /*
-  ==========================================
-  GERAR PIX
-  ==========================================
-  */
-
+  // ================================
+  // GERAR PIX (CORRIGIDO)
+  // ================================
   Future<void> gerarPix() async {
-
     try {
 
       final response = await http.post(
-
-        Uri.parse(
-          'http://localhost:3000/criar-pix',
-        ),
-
+        Uri.parse('$baseUrl/pix/criar-pix'),
         headers: {
           'Content-Type': 'application/json',
         },
-
         body: jsonEncode({
-
           'valor': widget.valor,
-
           'email': 'cliente@gmail.com',
-
           'nome': 'Antonio'
         }),
-      );
+      ).timeout(const Duration(seconds: 20));
+
+      if (response.statusCode != 200) {
+        throw Exception('Erro HTTP ${response.statusCode}');
+      }
 
       final data = jsonDecode(response.body);
 
-      if (data['success'] == true) {
+      Uint8List? qrTemp;
 
-        String base64Image =
-            data['qrCodeBase64'] ?? '';
+      final rawQr =
+          data['qrCodeBase64'] ?? data['encodedImage'] ?? '';
 
-        // REMOVE PREFIXO BASE64
-        if (base64Image.contains(',')) {
+      if (rawQr.isNotEmpty) {
+        try {
+          final clean = rawQr.contains(',')
+              ? rawQr.split(',').last
+              : rawQr;
 
-          base64Image =
-              base64Image.split(',').last;
+          qrTemp = base64Decode(clean);
+        } catch (e) {
+          debugPrint("Erro decode QR: $e");
         }
-
-        setState(() {
-
-          pixCopiaCola =
-              data['pixCopiaECola'] ?? '';
-
-          paymentId =
-              data['paymentId'] ?? '';
-
-          qrCodeImage =
-              base64Decode(base64Image);
-
-          loading = false;
-        });
-
-        iniciarVerificacaoPagamento();
-
-      } else {
-
-        setState(() {
-          loading = false;
-        });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-
-          SnackBar(
-
-            content: Text(
-              data['error'] ??
-                  'Erro ao gerar PIX',
-            ),
-          ),
-        );
       }
 
+      if (!mounted) return;
+
+      setState(() {
+        pixCopiaCola = data['pixCopiaECola'] ?? '';
+        paymentId    = data['paymentId'] ?? '';
+        qrCodeImage  = qrTemp;
+        loading      = false;
+      });
+
+      iniciarVerificacaoPagamento();
+
     } catch (e) {
+      if (!mounted) return;
 
       setState(() {
         loading = false;
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-
-        SnackBar(
-          content: Text(
-            'Erro PIX: $e',
-          ),
-        ),
+        SnackBar(content: Text('Erro PIX: $e')),
       );
     }
   }
 
-  /*
-  ==========================================
-  COPIAR PIX
-  ==========================================
-  */
-
+  // ================================
+  // COPIAR PIX
+  // ================================
   Future<void> copiarPix() async {
-
     await Clipboard.setData(
-
-      ClipboardData(
-        text: pixCopiaCola,
-      ),
+      ClipboardData(text: pixCopiaCola),
     );
 
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
-
-      const SnackBar(
-        content: Text('PIX copiado'),
-      ),
+      const SnackBar(content: Text('PIX copiado')),
     );
   }
 
-  /*
-  ==========================================
-  VERIFICAR PAGAMENTO
-  ==========================================
-  */
-
+  // ================================
+  // VERIFICAR PAGAMENTO
+  // ================================
   Future<void> iniciarVerificacaoPagamento() async {
 
+    int tentativas = 0;
+
     while (!pagamentoConfirmado) {
+
+      if (tentativas > 60) {
+        debugPrint("Timeout pagamento");
+        break;
+      }
 
       await Future.delayed(
         const Duration(seconds: 5),
       );
 
       try {
-
         final response = await http.get(
-
-          Uri.parse(
-            'http://localhost:3000/verificar-pagamento/$paymentId',
-          ),
+          Uri.parse('$baseUrl/pix/verificar-pagamento/$paymentId'),
         );
 
-        final data =
-            jsonDecode(response.body);
+        if (response.statusCode != 200) continue;
 
-        if (data['status'] == 'RECEIVED') {
+        final data = jsonDecode(response.body);
+        final status = data['status'] ?? '';
+
+        if (status == 'RECEIVED' || status == 'CONFIRMED') {
 
           if (!mounted) return;
 
           setState(() {
-
             pagamentoConfirmado = true;
           });
 
-          ScaffoldMessenger.of(context)
-              .showSnackBar(
+          HapticFeedback.mediumImpact();
 
+          ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text(
-                'Pagamento confirmado',
-              ),
+              content: Text('Pagamento confirmado'),
             ),
           );
 
-          Navigator.pop(context);
+          Navigator.pop(context, true);
 
           break;
         }
 
       } catch (e) {
-
-        debugPrint(
-          'Erro verificar pagamento: $e',
-        );
+        debugPrint('Erro verificar pagamento: $e');
       }
+
+      tentativas++;
     }
   }
 
+  // ================================
+  // UI
+  // ================================
   @override
   Widget build(BuildContext context) {
 
     return Dialog(
-
       shape: RoundedRectangleBorder(
-
-        borderRadius:
-            BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(24),
       ),
-
       child: Container(
-
         width: 420,
-
-        padding:
-            const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(24),
 
         child: loading
-
             ? const SizedBox(
-
                 height: 350,
-
                 child: Center(
-
-                  child:
-                      CircularProgressIndicator(),
+                  child: CircularProgressIndicator(),
                 ),
               )
 
             : SingleChildScrollView(
-
                 child: Column(
-
-                  mainAxisSize:
-                      MainAxisSize.min,
-
+                  mainAxisSize: MainAxisSize.min,
                   children: [
 
                     const Text(
-
                       'Pagamento PIX',
-
                       style: TextStyle(
-
                         fontSize: 28,
-
-                        fontWeight:
-                            FontWeight.bold,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
 
-                    const SizedBox(
-                      height: 12,
-                    ),
+                    const SizedBox(height: 12),
 
                     Text(
-
                       'R\$ ${widget.valor.toStringAsFixed(2)}',
-
-                      style:
-                          const TextStyle(
-
+                      style: const TextStyle(
                         fontSize: 36,
-
                         color: Colors.green,
-
-                        fontWeight:
-                            FontWeight.bold,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
 
-                    const SizedBox(
-                      height: 24,
-                    ),
+                    const SizedBox(height: 24),
 
                     if (qrCodeImage != null)
-
                       Container(
-
-                        padding:
-                            const EdgeInsets.all(16),
-
-                        decoration:
-                            BoxDecoration(
-
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
                           border: Border.all(
-
-                            color: Colors
-                                .grey
-                                .shade300,
+                            color: Colors.grey.shade300,
                           ),
-
-                          borderRadius:
-                              BorderRadius.circular(18),
+                          borderRadius: BorderRadius.circular(18),
                         ),
-
                         child: Image.memory(
-
                           qrCodeImage!,
-
                           width: 220,
                           height: 220,
-
                           fit: BoxFit.contain,
                         ),
                       ),
 
-                    const SizedBox(
-                      height: 24,
-                    ),
+                    const SizedBox(height: 24),
 
                     Container(
-
-                      padding:
-                          const EdgeInsets.symmetric(
-
+                      padding: const EdgeInsets.symmetric(
                         horizontal: 16,
                         vertical: 12,
                       ),
-
-                      decoration:
-                          BoxDecoration(
-
-                        color:
-                            Colors.orange.shade50,
-
-                        borderRadius:
-                            BorderRadius.circular(14),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.shade50,
+                        borderRadius: BorderRadius.circular(14),
                       ),
-
                       child: Row(
-
-                        mainAxisSize:
-                            MainAxisSize.min,
-
+                        mainAxisSize: MainAxisSize.min,
                         children: const [
-
                           SizedBox(
-
                             width: 18,
                             height: 18,
-
-                            child:
-                                CircularProgressIndicator(
+                            child: CircularProgressIndicator(
                               strokeWidth: 2,
                             ),
                           ),
-
-                          SizedBox(
-                            width: 12,
-                          ),
-
-                          Text(
-                            'Aguardando pagamento...',
-                          ),
+                          SizedBox(width: 12),
+                          Text('Aguardando pagamento...'),
                         ],
                       ),
                     ),
 
-                    const SizedBox(
-                      height: 20,
-                    ),
+                    const SizedBox(height: 20),
 
                     SelectableText(
-
                       pixCopiaCola,
-
-                      textAlign:
-                          TextAlign.center,
-
-                      style:
-                          const TextStyle(
-                        fontSize: 11,
-                      ),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 11),
                     ),
 
-                    const SizedBox(
-                      height: 20,
-                    ),
+                    const SizedBox(height: 20),
 
                     SizedBox(
-
                       width: double.infinity,
-
                       height: 52,
-
-                      child:
-                          ElevatedButton.icon(
-
+                      child: ElevatedButton.icon(
                         onPressed: copiarPix,
-
-                        icon: const Icon(
-                          Icons.copy,
-                        ),
-
-                        label: const Text(
-                          'Copiar código PIX',
-                        ),
-
-                        style:
-                            ElevatedButton.styleFrom(
-
-                          shape:
-                              RoundedRectangleBorder(
-
-                            borderRadius:
-                                BorderRadius.circular(14),
+                        icon: const Icon(Icons.copy),
+                        label: const Text('Copiar código PIX'),
+                        style: ElevatedButton.styleFrom(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
                           ),
                         ),
                       ),

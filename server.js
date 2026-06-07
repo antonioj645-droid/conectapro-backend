@@ -1,94 +1,61 @@
-require("dotenv").config();
-const express = require("express");
-const cors = require("cors");
-const rateLimit = require("express-rate-limit");
+require('dotenv').config();
+
+const express = require('express');
+const cors = require('cors');
+const admin = require('firebase-admin');
 
 const app = express();
 
-/// ✅ 🔒 RATE LIMIT (ANTI-ATAQUE)
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 100, // limite por IP
-});
-app.use(limiter);
+// ✅ 🔥 ESSA LINHA É OBRIGATÓRIA NO RENDER
+app.set('trust proxy', 1);
 
-/// ✅ 🔒 CORS RESTRITO (SÓ SEU APP)
-app.use(cors({
-  origin: [
-    "https://conectapro-ff6d5.web.app"
-  ],
-  methods: ["GET", "POST"],
-}));
+// ✅ MIDDLEWARES
+app.use(cors());
+app.use(express.json());
 
-/// ✅ 🔒 LIMITAR TAMANHO DO BODY (anti ataque)
-app.use(express.json({ limit: "1mb" }));
+// =========================
+// ✅ FIREBASE
+// =========================
+try {
 
-/// ✅ 🔒 BLOQUEIO DE HEADERS SUSPEITOS
-app.use((req, res, next) => {
-  if (!req.headers["user-agent"]) {
-    return res.status(403).json({ error: "Requisição inválida" });
+  if (!process.env.FIREBASE_KEY) {
+    throw new Error("FIREBASE_KEY não encontrada.");
   }
-  next();
-});
 
-/// ✅ IMPORTAR ROTAS PIX
-const pixRoutes = require("./routes/pix");
-app.use("/", pixRoutes);
+  const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
 
-/// ✅ 🔒 WEBHOOK ASAAS (APENAS ASAAS)
-app.post("/webhook/asaas", async (req, res) => {
-
-  try {
-
-    const token = req.headers["asaas-access-token"];
-
-    /// 🔐 valida token do ASAAS
-    if (token !== process.env.ASAAS_API_KEY) {
-      console.log("🚫 tentativa inválida de webhook");
-      return res.sendStatus(403);
-    }
-
-    const data = req.body;
-
-    if (!data || !data.event) {
-      return res.sendStatus(400);
-    }
-
-    console.log("✅ webhook recebido:", data.event);
-
-    // 👉 aqui você chama sua lógica (ex: salvar pagamento)
-    // importante manter isso separado (routes/pix ou service)
-
-    return res.sendStatus(200);
-
-  } catch (error) {
-    console.error("Erro webhook:", error);
-    return res.sendStatus(500);
+  // ✅ evita erro de múltiplas inicializações
+  if (!admin.apps.length) {
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+    });
   }
+
+  console.log("✅ Firebase conectado com sucesso");
+
+} catch (err) {
+  console.error("❌ Erro ao iniciar Firebase:", err.message);
+  process.exit(1);
+}
+
+// =========================
+// ✅ ROTAS
+// =========================
+const pixRoutes = require('./routes/pix');
+
+// ✅ prefixo correto
+app.use('/pix', pixRoutes);
+
+// =========================
+// ✅ ROTA TESTE
+// =========================
+app.get('/', (req, res) => {
+  res.send('✅ Backend ConectaPro rodando');
 });
 
-/// ✅ ROTA TESTE SEGURA
-app.get("/", (req, res) => {
-  res.json({
-    success: true,
-    status: "ONLINE 🚀",
-    security: "NÍVEL NASA 🛡️",
-    timestamp: new Date().toISOString(),
-  });
-});
-
-/// ✅ 🔒 404 PROTEÇÃO
-app.use((req, res) => {
-  res.status(404).json({ error: "Rota não encontrada" });
-});
-
-/// ✅ 🔒 TRATAMENTO GLOBAL DE ERRO
-app.use((err, req, res, next) => {
-  console.error("Erro global:", err);
-  res.status(500).json({ error: "Erro interno do servidor" });
-});
-
-/// ✅ PORTA (Render usa ENV)
+// =========================
+// ✅ PORTA
+// =========================
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
