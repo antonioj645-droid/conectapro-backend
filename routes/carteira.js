@@ -37,12 +37,12 @@ router.post("/desbloquear", async (req, res) => {
       const user = userDoc.data();
       const pedido = pedidoDoc.data();
 
-      // ✅ BLOQUEIO CRÍTICO (PADRÃO UBER)
-      if (user.tipo !== "profissional") {
+      // ✅ AGORA USA "role"
+      if (user.role !== "profissional") {
         throw new Error("Somente profissional pode pegar pedido");
       }
 
-      // ✅ evita dupla seleção
+      // ✅ evita duplicar
       if (pedido.providerId) {
         throw new Error("Pedido já foi aceito");
       }
@@ -53,19 +53,19 @@ router.post("/desbloquear", async (req, res) => {
         throw new Error("Saldo insuficiente");
       }
 
-      // ✅ DESCONTA R$3
+      // ✅ desconta R$3
       t.update(userRef, {
         balance: saldo - 3
       });
 
-      // ✅ GARANTE CHATID
+      // ✅ garante chatId
       let chatId = pedido.chatId;
 
       if (!chatId) {
         chatId = db.collection("chats").doc().id;
       }
 
-      // ✅ ATUALIZA PEDIDO
+      // ✅ atualiza pedido
       t.update(pedidoRef, {
         providerId: userId,
         status: "aceito",
