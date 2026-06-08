@@ -4,7 +4,7 @@ const admin = require("firebase-admin");
 
 const db = admin.firestore();
 
-// ✅ DESBLOQUEAR PEDIDO (R$3 - APENAS PROFISSIONAL)
+// ✅ DESBLOQUEAR PEDIDO (R$3)
 router.post("/desbloquear", async (req, res) => {
 
   const { userId, pedidoId } = req.body;
@@ -37,34 +37,39 @@ router.post("/desbloquear", async (req, res) => {
       const user = userDoc.data();
       const pedido = pedidoDoc.data();
 
-      // ✅ BLOQUEIA CLIENTE (CHAVE PRINCIPAL)
+      // ✅ BLOQUEIO CRÍTICO (PADRÃO UBER)
       if (user.tipo !== "profissional") {
         throw new Error("Somente profissional pode pegar pedido");
       }
 
-      const saldo = user.balance || 0;
-
-      // ✅ VALOR FIXO (R$3)
-      const valor = 3;
-
-      if (saldo < valor) {
-        throw new Error("Saldo insuficiente");
-      }
-
-      // ✅ NÃO DEIXA DUPLICAR
+      // ✅ evita dupla seleção
       if (pedido.providerId) {
         throw new Error("Pedido já foi aceito");
       }
 
-      // ✅ DESCONTA APENAS DO PROFISSIONAL
+      const saldo = user.balance || 0;
+
+      if (saldo < 3) {
+        throw new Error("Saldo insuficiente");
+      }
+
+      // ✅ DESCONTA R$3
       t.update(userRef, {
-        balance: saldo - valor
+        balance: saldo - 3
       });
+
+      // ✅ GARANTE CHATID
+      let chatId = pedido.chatId;
+
+      if (!chatId) {
+        chatId = db.collection("chats").doc().id;
+      }
 
       // ✅ ATUALIZA PEDIDO
       t.update(pedidoRef, {
         providerId: userId,
         status: "aceito",
+        chatId: chatId,
         acceptedAt: admin.firestore.FieldValue.serverTimestamp()
       });
 
@@ -75,6 +80,7 @@ router.post("/desbloquear", async (req, res) => {
     });
 
   } catch (error) {
+
     console.log("🔥 ERRO:", error);
 
     return res.status(400).json({
