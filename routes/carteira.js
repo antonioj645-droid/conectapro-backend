@@ -4,7 +4,7 @@ const admin = require("firebase-admin");
 
 const db = admin.firestore();
 
-// ✅ DESBLOQUEAR PEDIDO (R$3)
+// ✅ DESBLOQUEAR PEDIDO (R$3 - APENAS PROFISSIONAL)
 router.post("/desbloquear", async (req, res) => {
 
   const { userId, pedidoId } = req.body;
@@ -24,33 +24,48 @@ router.post("/desbloquear", async (req, res) => {
     await db.runTransaction(async (t) => {
 
       const userDoc = await t.get(userRef);
-      const pedidoDoc = await t.get(pedidoRef); // ✅ FALTAVA ISSO
+      const pedidoDoc = await t.get(pedidoRef);
 
-      // ✅ valida usuário
       if (!userDoc.exists) {
         throw new Error("Usuário não encontrado");
       }
 
-      // ✅ valida pedido (ESSENCIAL)
       if (!pedidoDoc.exists) {
         throw new Error("Pedido não encontrado");
       }
 
       const user = userDoc.data();
+      const pedido = pedidoDoc.data();
+
+      // ✅ BLOQUEIA CLIENTE (CHAVE PRINCIPAL)
+      if (user.tipo !== "profissional") {
+        throw new Error("Somente profissional pode pegar pedido");
+      }
+
       const saldo = user.balance || 0;
 
-      if (saldo < 3) {
+      // ✅ VALOR FIXO (R$3)
+      const valor = 3;
+
+      if (saldo < valor) {
         throw new Error("Saldo insuficiente");
       }
 
-      // ✅ desconta saldo
+      // ✅ NÃO DEIXA DUPLICAR
+      if (pedido.providerId) {
+        throw new Error("Pedido já foi aceito");
+      }
+
+      // ✅ DESCONTA APENAS DO PROFISSIONAL
       t.update(userRef, {
-        balance: saldo - 3
+        balance: saldo - valor
       });
 
-      // ✅ libera pedido
+      // ✅ ATUALIZA PEDIDO
       t.update(pedidoRef, {
-        providerId: userId
+        providerId: userId,
+        status: "aceito",
+        acceptedAt: admin.firestore.FieldValue.serverTimestamp()
       });
 
     });
@@ -60,8 +75,7 @@ router.post("/desbloquear", async (req, res) => {
     });
 
   } catch (error) {
-
-    console.log("🔥 ERRO BACKEND REAL:", error);
+    console.log("🔥 ERRO:", error);
 
     return res.status(400).json({
       success: false,
