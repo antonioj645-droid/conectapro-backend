@@ -76,6 +76,7 @@ router.post("/finalizar-servico/:id", async (req, res) => {
 
             // ✅ FINALIZA PEDIDO
             const admin = require("firebase-admin");
+
             t.update(pedidoRef, {
                 status:         "concluido",
                 comissaoPaga:   true,
