@@ -17,29 +17,30 @@ app.use(cors({
 
 app.use(express.json());
 
-// ✅ FIREBASE
+// ✅ FIREBASE (não trava se não tiver configurado)
 try {
 
-  if (!process.env.FIREBASE_KEY) {
-    throw new Error("FIREBASE_KEY não encontrada.");
+  if (process.env.FIREBASE_KEY) {
+
+    const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
+
+    if (!admin.apps.length) {
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+      });
+    }
+
+    console.log("✅ Firebase conectado com sucesso");
+
+  } else {
+    console.log("⚠️ Firebase não configurado (modo teste)");
   }
-
-  const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
-
-  if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-    });
-  }
-
-  console.log("✅ Firebase conectado com sucesso");
 
 } catch (err) {
   console.error("❌ Erro ao iniciar Firebase:", err.message);
-  process.exit(1);
 }
 
-// ✅ LOG
+// ✅ LOG DE REQUISIÇÕES
 app.use((req, res, next) => {
   console.log(`📡 ${req.method} ${req.url}`);
   next();
@@ -51,6 +52,10 @@ app.use('/pix', pixRoutes);
 
 const carteiraRoutes = require('./routes/carteira');
 app.use('/carteira', carteiraRoutes);
+
+// 🔥 PEDIDOS (COMISSÃO)
+const pedidosRoutes = require('./routes/pedidos');
+app.use('/pedidos', pedidosRoutes);
 
 // ✅ TESTE
 app.get('/', (req, res) => {

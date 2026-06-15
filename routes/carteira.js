@@ -1,11 +1,24 @@
 const express = require("express");
 const router = express.Router();
-const admin = require("firebase-admin");
+const getDB = require("../firebase");
 
-const db = admin.firestore();
+let db;
+
+try {
+  db = getDB();
+} catch (err) {
+  console.error("❌ Erro Firebase:", err.message);
+}
 
 // ✅ DESBLOQUEAR PEDIDO (R$3)
 router.post("/desbloquear", async (req, res) => {
+
+  if (!db) {
+    return res.status(500).json({
+      success: false,
+      error: "Banco indisponível"
+    });
+  }
 
   const { userId, pedidoId } = req.body;
 
@@ -37,12 +50,12 @@ router.post("/desbloquear", async (req, res) => {
       const user = userDoc.data();
       const pedido = pedidoDoc.data();
 
-      // ✅ AGORA USA "role"
+      // ✅ VALIDAÇÃO DE ROLE
       if (user.role !== "profissional") {
         throw new Error("Somente profissional pode pegar pedido");
       }
 
-      // ✅ evita duplicar
+      // ✅ EVITA DUPLICAÇÃO
       if (pedido.providerId) {
         throw new Error("Pedido já foi aceito");
       }
@@ -53,19 +66,21 @@ router.post("/desbloquear", async (req, res) => {
         throw new Error("Saldo insuficiente");
       }
 
-      // ✅ desconta R$3
+      // ✅ DESCONTA R$3
       t.update(userRef, {
         balance: saldo - 3
       });
 
-      // ✅ garante chatId
+      // ✅ GARANTE chatId
       let chatId = pedido.chatId;
 
       if (!chatId) {
         chatId = db.collection("chats").doc().id;
       }
 
-      // ✅ atualiza pedido
+      // ✅ ATUALIZA PEDIDO
+      const admin = require("firebase-admin"); // 🔥 usa só aqui
+
       t.update(pedidoRef, {
         providerId: userId,
         status: "aceito",
@@ -76,12 +91,13 @@ router.post("/desbloquear", async (req, res) => {
     });
 
     return res.json({
-      success: true
+      success: true,
+      message: "Pedido desbloqueado com sucesso"
     });
 
   } catch (error) {
 
-    console.log("🔥 ERRO:", error);
+    console.error("🔥 ERRO:", error.message);
 
     return res.status(400).json({
       success: false,
