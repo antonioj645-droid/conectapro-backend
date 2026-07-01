@@ -2,6 +2,83 @@ const express = require("express");
 const router = express.Router();
 const getDB = require("../firebase");
 
+// ─── HELPER: envia notificação FCM ────────────────────────────────────────────
+async function enviarNotificacao(fcmToken, title, body) {
+    if (!fcmToken) return;
+    try {
+        const admin = require("firebase-admin");
+        await admin.messaging().send({
+            token: fcmToken,
+            notification: { title, body },
+            android: {
+                priority: "high",
+                notification: {
+                    sound: "default",
+                    channelId: "conectapro_channel",
+                },
+            },
+        });
+        console.log("✅ Notificação enviada para:", fcmToken);
+    } catch (err) {
+        console.error("⚠️ Erro ao enviar notificação:", err.message);
+        // Não lança erro — falha de notificação não deve travar o fluxo
+    }
+}
+// ──────────────────────────────────────────────────────────────────────────────
+
+// ✅ NOVO PEDIDO — notifica profissionais da mesma categoria
+router.post("/novo-pedido", async (req, res) => {
+
+    let db;
+
+    try {
+        db = getDB();
+    } catch (err) {
+        return res.status(500).json({
+            erro: "Erro ao conectar com banco"
+        });
+    }
+
+    const { pedidoId, titulo, categoria, subcategoria } = req.body;
+
+    if (!pedidoId || !categoria) {
+        return res.status(400).json({ erro: "Dados inválidos" });
+    }
+
+    try {
+
+        const snap = await db
+            .collection("users")
+            .where("role", "==", "profissional")
+            .where("categoria", "==", categoria)
+            .get();
+
+        const envios = [];
+        snap.forEach((doc) => {
+            const fcmToken = doc.data()?.fcmToken;
+            if (fcmToken) {
+                envios.push(
+                    enviarNotificacao(
+                        fcmToken,
+                        "Novo pedido disponível! 🔔",
+                        `${titulo || "Novo serviço"} — ${subcategoria || categoria}`
+                    )
+                );
+            }
+        });
+
+        await Promise.all(envios);
+
+        res.json({ sucesso: true, notificados: envios.length });
+
+    } catch (err) {
+
+        console.error("🔴 ERRO novo-pedido:", err.message);
+
+        res.status(400).json({ erro: err.message });
+    }
+});
+
 // ✅ FINALIZAR SERVIÇO (COMISSÃO AUTOMÁTICA)
 router.post("/finalizar-servico/:id", async (req, res) => {
 
