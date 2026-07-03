@@ -6,11 +6,11 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
 class PixDialog extends StatefulWidget {
-  final double valor;
+  final double? valor; // opcional — se não vier, profissional escolhe na tela
 
   const PixDialog({
     super.key,
-    required this.valor,
+    this.valor,
   });
 
   @override
@@ -19,8 +19,14 @@ class PixDialog extends StatefulWidget {
 
 class _PixDialogState extends State<PixDialog> {
 
-  bool loading = true;
+  bool loading = false;
   bool pagamentoConfirmado = false;
+
+  // Se valor não veio, começa na tela de escolha
+  late bool escolhendoValor = widget.valor == null;
+
+  double valorEscolhido = 0;
+  final TextEditingController _valorCtrl = TextEditingController();
 
   String pixCopiaCola = '';
   String paymentId = '';
@@ -33,13 +39,47 @@ class _PixDialogState extends State<PixDialog> {
   @override
   void initState() {
     super.initState();
+    if (widget.valor != null) {
+      valorEscolhido = widget.valor!;
+      gerarPix();
+    }
+  }
+
+  @override
+  void dispose() {
+    _valorCtrl.dispose();
+    super.dispose();
+  }
+
+  // ================================
+  // CONFIRMAR VALOR ESCOLHIDO
+  // ================================
+  void confirmarValor() {
+    final texto = _valorCtrl.text.trim().replaceAll(',', '.');
+    final valor = double.tryParse(texto);
+
+    if (valor == null || valor < 3) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Digite um valor válido (mínimo R\$ 3,00)')),
+      );
+      return;
+    }
+
+    setState(() {
+      valorEscolhido = valor;
+      escolhendoValor = false;
+      loading = true;
+    });
+
     gerarPix();
   }
 
   // ================================
-  // GERAR PIX (CORRIGIDO)
+  // GERAR PIX
   // ================================
   Future<void> gerarPix() async {
+    setState(() => loading = true);
+
     try {
 
       final response = await http.post(
@@ -48,7 +88,7 @@ class _PixDialogState extends State<PixDialog> {
           'Content-Type': 'application/json',
         },
         body: jsonEncode({
-          'valor': widget.valor,
+          'valor': valorEscolhido,
           'email': 'cliente@gmail.com',
           'nome': 'Antonio'
         }),
@@ -134,6 +174,8 @@ class _PixDialogState extends State<PixDialog> {
         const Duration(seconds: 5),
       );
 
+      if (!mounted) return;
+
       try {
         final response = await http.get(
           Uri.parse('$baseUrl/pix/verificar-pagamento/$paymentId'),
@@ -174,7 +216,180 @@ class _PixDialogState extends State<PixDialog> {
   }
 
   // ================================
-  // UI
+  // UI — TELA DE ESCOLHA DE VALOR
+  // ================================
+  Widget _buildEscolhaValor() {
+    return SizedBox(
+      height: 320,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'Adicionar saldo',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Quanto você quer adicionar?',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.black54),
+          ),
+          const SizedBox(height: 24),
+          TextField(
+            controller: _valorCtrl,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            autofocus: true,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+            decoration: InputDecoration(
+              prefixText: 'R\$ ',
+              hintText: '0,00',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            alignment: WrapAlignment.center,
+            children: [10, 20, 50, 100].map((v) {
+              return OutlinedButton(
+                onPressed: () {
+                  _valorCtrl.text = v.toString();
+                },
+                child: Text('R\$ $v'),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 24),
+          SizedBox(
+            height: 52,
+            child: ElevatedButton(
+              onPressed: confirmarValor,
+              style: ElevatedButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              child: const Text('Continuar'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ================================
+  // UI — TELA DO PIX (QR CODE)
+  // ================================
+  Widget _buildPix() {
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+
+          const Text(
+            'Pagamento PIX',
+            style: TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
+          Text(
+            'R\$ ${valorEscolhido.toStringAsFixed(2)}',
+            style: const TextStyle(
+              fontSize: 36,
+              color: Colors.green,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          if (qrCodeImage != null)
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: Colors.grey.shade300,
+                ),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Image.memory(
+                qrCodeImage!,
+                width: 220,
+                height: 220,
+                fit: BoxFit.contain,
+              ),
+            ),
+
+          const SizedBox(height: 24),
+
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 12,
+            ),
+            decoration: BoxDecoration(
+              color: Colors.orange.shade50,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                  ),
+                ),
+                SizedBox(width: 12),
+                Text('Aguardando pagamento...'),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          SelectableText(
+            pixCopiaCola,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 11),
+          ),
+
+          const SizedBox(height: 20),
+
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: ElevatedButton.icon(
+              onPressed: copiarPix,
+              icon: const Icon(Icons.copy),
+              label: const Text('Copiar código PIX'),
+              style: ElevatedButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ================================
+  // UI PRINCIPAL
   // ================================
   @override
   Widget build(BuildContext context) {
@@ -187,111 +402,16 @@ class _PixDialogState extends State<PixDialog> {
         width: 420,
         padding: const EdgeInsets.all(24),
 
-        child: loading
-            ? const SizedBox(
-                height: 350,
-                child: Center(
-                  child: CircularProgressIndicator(),
-                ),
-              )
-
-            : SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-
-                    const Text(
-                      'Pagamento PIX',
-                      style: TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-                      ),
+        child: escolhendoValor
+            ? _buildEscolhaValor()
+            : (loading
+                ? const SizedBox(
+                    height: 350,
+                    child: Center(
+                      child: CircularProgressIndicator(),
                     ),
-
-                    const SizedBox(height: 12),
-
-                    Text(
-                      'R\$ ${widget.valor.toStringAsFixed(2)}',
-                      style: const TextStyle(
-                        fontSize: 36,
-                        color: Colors.green,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-
-                    const SizedBox(height: 24),
-
-                    if (qrCodeImage != null)
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          border: Border.all(
-                            color: Colors.grey.shade300,
-                          ),
-                          borderRadius: BorderRadius.circular(18),
-                        ),
-                        child: Image.memory(
-                          qrCodeImage!,
-                          width: 220,
-                          height: 220,
-                          fit: BoxFit.contain,
-                        ),
-                      ),
-
-                    const SizedBox(height: 24),
-
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.shade50,
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: const [
-                          SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                            ),
-                          ),
-                          SizedBox(width: 12),
-                          Text('Aguardando pagamento...'),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 20),
-
-                    SelectableText(
-                      pixCopiaCola,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 11),
-                    ),
-
-                    const SizedBox(height: 20),
-
-                    SizedBox(
-                      width: double.infinity,
-                      height: 52,
-                      child: ElevatedButton.icon(
-                        onPressed: copiarPix,
-                        icon: const Icon(Icons.copy),
-                        label: const Text('Copiar código PIX'),
-                        style: ElevatedButton.styleFrom(
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+                  )
+                : _buildPix()),
       ),
     );
   }

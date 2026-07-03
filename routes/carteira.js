@@ -34,7 +34,7 @@ async function enviarNotificacao(fcmToken, title, body) {
 }
 // ──────────────────────────────────────────────────────────────────────────────
 
-// ✅ DESBLOQUEAR PEDIDO (R$3)
+// ✅ DESBLOQUEAR PEDIDO (R$1)
 router.post("/desbloquear", async (req, res) => {
 
   if (!db) {
@@ -72,15 +72,15 @@ router.post("/desbloquear", async (req, res) => {
       if (pedido.providerId)            throw new Error("Pedido já foi aceito");
 
       const saldo = user.balance || 0;
-      if (saldo < 3) throw new Error("Saldo insuficiente");
+      if (saldo < 1) throw new Error("Saldo insuficiente");
 
       // Captura dados para notificação
       clienteId        = pedido.clienteId || pedido.clientId || null;
       nomeProfissional = user.nome || user.name || "Um profissional";
       descricaoPedido  = pedido.descricao || pedido.description || "seu pedido";
 
-      // Desconta R$3
-      t.update(userRef, { balance: saldo - 3 });
+      // Desconta R$1
+      t.update(userRef, { balance: saldo - 1 });
 
       // Garante chatId
       let chatId = pedido.chatId;
