@@ -54,10 +54,33 @@ async function getCliente(nome, email) {
   const { data } = await asaas.get("/customers", { params: { email } });
 
   if (data.data.length > 0) {
-    return data.data[0].id;
+    const clienteExistente = data.data[0];
+
+    // Cliente já existe (criado antes desta mudança). Se ainda não tiver
+    // as notificações desativadas, atualiza agora para parar de gerar
+    // cobrança de R$0,99 por SMS/e-mail em cobranças futuras.
+    if (!clienteExistente.notificationDisabled) {
+      try {
+        await asaas.post(`/customers/${clienteExistente.id}`, {
+          notificationDisabled: true,
+        });
+      } catch (e) {
+        console.log("⚠️ não foi possível desativar notificações do cliente existente:", e.response?.data || e.message);
+      }
+    }
+
+    return clienteExistente.id;
   }
 
-  const novo = await asaas.post("/customers", { name: nome, email });
+  // Cliente novo: já cria com notificações (SMS/e-mail) desativadas.
+  // Isso evita a cobrança de R$0,99 por mensagem que a Asaas envia por padrão.
+  // A confirmação do PIX e o crédito do saldo continuam acontecendo normalmente
+  // pelo endpoint /verificar-pagamento, então nada muda no fluxo interno do app.
+  const novo = await asaas.post("/customers", {
+    name: nome,
+    email,
+    notificationDisabled: true,
+  });
   return novo.data.id;
 }
 
@@ -76,8 +99,11 @@ router.post("/criar-pix", async (req, res) => {
     });
   }
 
-  if (!valor || Number(valor) <= 0) {
-    return res.status(400).json({ success: false, error: "Valor inválido." });
+  if (!valor || Number(valor) < 5) {
+    return res.status(400).json({
+      success: false,
+      error: "Valor mínimo para PIX é R$ 5,00 (limite do Asaas).",
+    });
   }
 
   try {
