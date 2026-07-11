@@ -82,9 +82,9 @@ router.post("/desbloquear", async (req, res) => {
       // Desconta R$1
       t.update(userRef, { balance: saldo - 1 });
 
-      // Garante chatId
-      let chatId = pedido.chatId;
-      if (!chatId) chatId = db.collection("chats").doc().id;
+      // Garante chatId — SEMPRE igual ao pedidoId, pra bater com a regra do Firestore
+      // (a regra de /chats/{chatId} valida via exists(/requests/{chatId}))
+      let chatId = pedido.chatId || pedidoId;
 
       // Atualiza pedido
       t.update(pedidoRef, {
