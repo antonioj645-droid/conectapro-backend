@@ -18,10 +18,17 @@ const origensPermitidas = [
   'https://conectapro-ff6d5.firebaseapp.com', // domínio alternativo padrão do Firebase Hosting
 ];
 
+// `flutter run -d chrome` abre em localhost com uma porta aleatória a cada
+// execução — em vez de cadastrar porta por porta, libera qualquer porta em
+// localhost/127.0.0.1. É seguro: um navegador só manda "origin: localhost"
+// quando a página realmente está rodando na própria máquina de quem acessa,
+// ninguém de fora consegue forjar isso pra atacar outro usuário.
+const localhostRegex = /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/;
+
 app.use(cors({
   origin: (origin, callback) => {
     // Sem "origin" = requisição não veio de navegador (app mobile, Postman, etc.)
-    if (!origin || origensPermitidas.includes(origin)) {
+    if (!origin || origensPermitidas.includes(origin) || localhostRegex.test(origin)) {
       callback(null, true);
     } else {
       console.warn('⚠️ CORS bloqueado para origem:', origin);
