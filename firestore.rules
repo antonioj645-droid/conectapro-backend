@@ -1,0 +1,117 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function logado() {
+      return request.auth != null;
+    }
+
+    function souEu(uid) {
+      return logado() && request.auth.uid == uid;
+    }
+
+    function meuRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function souAdmin() {
+      return logado() && meuRole() == 'admin';
+    }
+
+
+    match /users/{userId} {
+
+      allow read: if logado();
+
+      allow create: if souEu(userId);
+
+      // Permite que o próprio usuário (ou admin) atualize seu perfil livremente.
+      // Também permite que QUALQUER usuário logado atualize apenas os campos de
+      // avaliação (usado ao avaliar um profissional), com validação de tipo e
+      // faixa de valor para impedir que alguém force uma nota/selo falsos.
+      allow update: if souAdmin() || souEu(userId) || (
+        logado() &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['totalAvaliacoes', 'somaAvaliacoes', 'mediaAvaliacao', 'verificado']) &&
+        request.resource.data.mediaAvaliacao is number &&
+        request.resource.data.mediaAvaliacao >= 0 &&
+        request.resource.data.mediaAvaliacao <= 5 &&
+        request.resource.data.totalAvaliacoes is number &&
+        request.resource.data.totalAvaliacoes >= 0 &&
+        request.resource.data.somaAvaliacoes is number &&
+        request.resource.data.somaAvaliacoes >= 0 &&
+        request.resource.data.verificado is bool
+      );
+
+      allow delete: if false;
+    }
+
+
+    match /requests/{pedidoId} {
+
+      allow read: if logado();
+
+      // Só permite criar um pedido em nome de si mesmo (clienteId = quem está criando).
+      allow create: if logado() && request.resource.data.clienteId == request.auth.uid;
+
+      // Só o cliente dono, o profissional já responsável, ou um profissional
+      // pegando um pedido ainda sem dono podem atualizar. Ninguém pode trocar
+      // o clienteId (o que sequestraria o pedido de outra pessoa).
+      allow update: if logado() &&
+        request.resource.data.clienteId == resource.data.clienteId && (
+          resource.data.clienteId == request.auth.uid ||
+          resource.data.providerId == request.auth.uid ||
+          resource.data.providerId == null ||
+          resource.data.providerId == ''
+        );
+
+      allow delete: if souAdmin() ||
+        resource.data.clienteId == request.auth.uid;
+    }
+
+
+    match /chats/{chatId} {
+
+      allow read, write: if logado();
+
+      match /messages/{messageId} {
+        allow read, write: if logado();
+      }
+    }
+
+
+    match /suporte_chats/{userId} {
+      // Documento é sempre criado com doc(user.uid) — só o próprio dono (ou admin)
+      // pode ler/escrever seu chat de suporte com o admin.
+      allow read, write: if souAdmin() || souEu(userId);
+    }
+
+
+    match /pix_payments/{paymentId} {
+      // Só o backend (Firebase Admin SDK, que ignora estas regras) grava
+      // pagamentos. O app nunca escreve aqui diretamente — só lê o próprio
+      // pagamento, identificado pelo campo "userId".
+      allow read: if logado() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+
+    match /earnings/{docId} {
+      allow read: if souAdmin();
+      allow write: if false;
+    }
+
+
+    match /config/{docId} {
+      allow read: if true;
+    }
+
+
+    // Bloqueia por padrão qualquer coleção não listada explicitamente acima
+    // (ex: coleções órfãs/de teste como "app" e "pagamentos").
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+  }
+}
