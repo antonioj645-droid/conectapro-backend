@@ -54,6 +54,35 @@ function extrairErroAsaas(error) {
   return error.message || "Erro desconhecido ao comunicar com a Asaas.";
 }
 
+// ─── Middleware: verifica o token do Firebase Auth ──────────────────────────
+// Sem isso, qualquer pessoa que conheça a URL do backend poderia chamar
+// estas rotas passando o userId de outra pessoa no corpo da requisição.
+// Com isso, o UID só pode vir de um token válido emitido pelo Firebase
+// pro próprio usuário logado — não dá mais pra "falar" que é outra pessoa.
+async function verificarToken(req, res, next) {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      error: "Token de autenticação ausente.",
+    });
+  }
+
+  try {
+    const decoded = await admin.auth().verifyIdToken(token);
+    req.uid = decoded.uid;
+    next();
+  } catch (err) {
+    console.error("❌ [PIX] token inválido:", err.message);
+    return res.status(401).json({
+      success: false,
+      error: "Token de autenticação inválido ou expirado.",
+    });
+  }
+}
+
 async function buscarQr(paymentId) {
   for (let i = 0; i < 20; i++) {
     try {
@@ -107,17 +136,13 @@ async function getCliente(nome, email, cpfCnpj) {
 // ================================
 // CRIAR PIX
 // ================================
-router.post("/criar-pix", async (req, res) => {
-  const { valor, nome, email, userId, cpfCnpj } = req.body;
+router.post("/criar-pix", verificarToken, async (req, res) => {
+  // O userId agora vem do token verificado, não do corpo da requisição.
+  // Isso impede que alguém gere uma cobrança em nome de outra pessoa.
+  const userId = req.uid;
+  const { valor, nome, email, cpfCnpj } = req.body;
 
   console.log("➡️ [PIX] criar-pix chamado:", { userId, valor, temCpfCnpj: !!cpfCnpj });
-
-  if (!userId) {
-    return res.status(400).json({
-      success: false,
-      error: "userId é obrigatório para identificar quem está pagando.",
-    });
-  }
 
   if (!valor || Number(valor) < 5) {
     return res.status(400).json({
@@ -192,7 +217,7 @@ router.post("/criar-pix", async (req, res) => {
 // ================================
 // BUSCAR QR SEPARADO
 // ================================
-router.get("/pix-qrcode/:id", async (req, res) => {
+router.get("/pix-qrcode/:id", verificarToken, async (req, res) => {
   try {
     const qr = await buscarQr(req.params.id);
     if (!qr) {
@@ -239,10 +264,18 @@ async function notificarPagamentoConfirmado(userId, valor) {
 // ================================
 // VERIFICAR STATUS (e creditar saldo, uma única vez)
 // ================================
-router.get("/verificar-pagamento/:id", async (req, res) => {
+router.get("/verificar-pagamento/:id", verificarToken, async (req, res) => {
   const paymentId = req.params.id;
 
   try {
+    // Confere se esse pagamento pertence mesmo a quem está perguntando —
+    // impede que um usuário consulte o status de pagamentos de outra pessoa.
+    const pagRefCheck = db.collection("pix_payments").doc(paymentId);
+    const pagDocCheck = await pagRefCheck.get();
+    if (pagDocCheck.exists && pagDocCheck.data().userId !== req.uid) {
+      return res.status(403).json({ success: false, error: "Acesso negado." });
+    }
+
     const { data } = await asaas.get(`/payments/${paymentId}`);
     const status = data.status;
 
