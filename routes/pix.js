@@ -54,7 +54,7 @@ function extrairErroAsaas(error) {
   return error.message || "Erro desconhecido ao comunicar com a Asaas.";
 }
 
-// ─── Middleware: verifica o token do Firebase Auth ──────────────────────────
+// ─── Middleware: verifica o token do Firebase Auth ────────────────────────────
 // Sem isso, qualquer pessoa que conheça a URL do backend poderia chamar
 // estas rotas passando o userId de outra pessoa no corpo da requisição.
 // Com isso, o UID só pode vir de um token válido emitido pelo Firebase
@@ -142,7 +142,7 @@ router.post("/criar-pix", verificarToken, async (req, res) => {
   const userId = req.uid;
   const { valor, nome, email, cpfCnpj } = req.body;
 
-  console.log("➡️ [PIX] criar-pix chamado:", { userId, valor, temCpfCnpj: !!cpfCnpj });
+  console.log("ℹ️ [PIX] criar-pix chamado:", { userId, valor, temCpfCnpj: !!cpfCnpj });
 
   if (!valor || Number(valor) < 5) {
     return res.status(400).json({

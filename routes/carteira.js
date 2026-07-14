@@ -29,12 +29,10 @@ async function enviarNotificacao(fcmToken, title, body) {
     console.log("✅ Notificação enviada para:", fcmToken);
   } catch (err) {
     console.error("⚠️ Erro ao enviar notificação:", err.message);
-    // Não lança erro — falha de notificação não deve cancelar o aceite
   }
 }
-// ──────────────────────────────────────────────────────────────────────────────
 
-// ✅ DESBLOQUEAR PEDIDO (R$1)
+// ✅ DESBLOQUEAR PEDIDO (R$1) — cobrado via Asaas LED
 router.post("/desbloquear", async (req, res) => {
 
   if (!db) {
@@ -52,10 +50,8 @@ router.post("/desbloquear", async (req, res) => {
     const userRef   = db.collection("users").doc(userId);
     const pedidoRef = db.collection("requests").doc(pedidoId);
 
-    // Variáveis que precisamos fora da transaction para notificar depois
-    let clienteId   = null;
+    let clienteId        = null;
     let nomeProfissional = null;
-    let descricaoPedido  = null;
 
     await db.runTransaction(async (t) => {
 
@@ -71,20 +67,19 @@ router.post("/desbloquear", async (req, res) => {
       if (user.role !== "profissional") throw new Error("Somente profissional pode pegar pedido");
       if (pedido.providerId)            throw new Error("Pedido já foi aceito");
 
+      // ✅ Verifica saldo mínimo de R$1
       const saldo = user.balance || 0;
       if (saldo < 1) throw new Error("Saldo insuficiente");
 
-      // Captura dados para notificação
       clienteId        = pedido.clienteId || pedido.clientId || null;
       nomeProfissional = user.nome || user.name || "Um profissional";
-      descricaoPedido  = pedido.descricao || pedido.description || "seu pedido";
 
-      // Desconta R$1
+      // ✅ Desconta R$1 (não R$3)
       t.update(userRef, { balance: saldo - 1 });
 
-      // Garante chatId — SEMPRE igual ao pedidoId, pra bater com a regra do Firestore
-      // (a regra de /chats/{chatId} valida via exists(/requests/{chatId}))
-      let chatId = pedido.chatId || pedidoId;
+      // Garante chatId
+      let chatId = pedido.chatId;
+      if (!chatId) chatId = db.collection("chats").doc().id;
 
       // Atualiza pedido
       t.update(pedidoRef, {
@@ -96,7 +91,7 @@ router.post("/desbloquear", async (req, res) => {
 
     });
 
-    // 🔔 Notifica o cliente APÓS a transaction (fora do lock)
+    // 🔔 Notifica o cliente APÓS a transaction
     if (clienteId) {
       try {
         const clienteDoc = await db.collection("users").doc(clienteId).get();
