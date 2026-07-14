@@ -32,16 +32,47 @@ async function enviarNotificacao(fcmToken, title, body) {
   }
 }
 
+// ─── Middleware: verifica o token do Firebase Auth ────────────────────────────
+// Mesmo padrão usado em routes/pix.js: sem isso, qualquer pessoa que conheça
+// a URL do backend poderia chamar /desbloquear passando o userId de outra
+// pessoa no corpo da requisição e gastar o saldo dela sem autorização.
+async function verificarToken(req, res, next) {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      error: "Token de autenticação ausente.",
+    });
+  }
+
+  try {
+    const decoded = await admin.auth().verifyIdToken(token);
+    req.uid = decoded.uid;
+    next();
+  } catch (err) {
+    console.error("❌ [carteira] token inválido:", err.message);
+    return res.status(401).json({
+      success: false,
+      error: "Token de autenticação inválido ou expirado.",
+    });
+  }
+}
+
 // ✅ DESBLOQUEAR PEDIDO (R$1) — cobrado via Asaas LED
-router.post("/desbloquear", async (req, res) => {
+router.post("/desbloquear", verificarToken, async (req, res) => {
 
   if (!db) {
     return res.status(500).json({ success: false, error: "Banco indisponível" });
   }
 
-  const { userId, pedidoId } = req.body;
+  // O userId agora vem do token verificado, não do corpo da requisição —
+  // impede que alguém desbloqueie um pedido gastando o saldo de outra pessoa.
+  const userId = req.uid;
+  const { pedidoId } = req.body;
 
-  if (!userId || !pedidoId) {
+  if (!pedidoId) {
     return res.status(400).json({ success: false, error: "Dados inválidos" });
   }
 
