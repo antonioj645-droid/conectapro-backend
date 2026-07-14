@@ -110,7 +110,18 @@ router.post("/desbloquear", verificarToken, async (req, res) => {
 
       // Garante chatId
       let chatId = pedido.chatId;
+      const chatNovo = !chatId;
       if (!chatId) chatId = db.collection("chats").doc().id;
+
+      // Grava quem participa do chat — a regra do Firestore usa isso pra
+      // garantir que só cliente e profissional deste pedido possam ler/escrever.
+      if (chatNovo) {
+        t.set(db.collection("chats").doc(chatId), {
+          clienteId:  clienteId,
+          providerId: userId,
+          criadoEm:   admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
 
       // Atualiza pedido
       t.update(pedidoRef, {
