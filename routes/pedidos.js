@@ -85,22 +85,16 @@ router.post("/finalizar-servico/:pedidoId", async (req, res) => {
   }
 
   const { pedidoId } = req.params;
-<<<<<<< HEAD
   const { codigo } = req.body;
-=======
->>>>>>> b4d685c (fix: remove codigo morto R$3)
 
   if (!pedidoId) {
     return res.status(400).json({ success: false, erro: "Pedido inválido" });
   }
 
-<<<<<<< HEAD
   if (!codigo || String(codigo).trim().length !== 4) {
     return res.status(400).json({ success: false, erro: "Código de confirmação inválido" });
   }
 
-=======
->>>>>>> b4d685c (fix: remove codigo morto R$3)
   try {
 
     let clienteId  = null;
@@ -118,14 +112,11 @@ router.post("/finalizar-servico/:pedidoId", async (req, res) => {
       if (pedido.status === "concluido") throw new Error("Pedido já foi finalizado");
       if (!pedido.providerId)            throw new Error("Pedido ainda não tem profissional");
 
-<<<<<<< HEAD
       const codigoEsperado = String(pedido.codigoConfirmacao || "").trim();
       if (!codigoEsperado || String(codigo).trim() !== codigoEsperado) {
         throw new Error("Código de confirmação incorreto");
       }
 
-=======
->>>>>>> b4d685c (fix: remove codigo morto R$3)
       const valorServico = pedido.valorServico || pedido.valor || 0;
       if (!valorServico || valorServico <= 0) throw new Error("Valor do serviço não definido");
 
