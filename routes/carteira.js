@@ -86,6 +86,7 @@ router.post("/desbloquear", verificarToken, async (req, res) => {
 
     await db.runTransaction(async (t) => {
 
+      // ── FASE DE LEITURA (tem que vir toda antes de qualquer escrita) ──
       const userDoc   = await t.get(userRef);
       const pedidoDoc = await t.get(pedidoRef);
 
@@ -105,23 +106,16 @@ router.post("/desbloquear", verificarToken, async (req, res) => {
       clienteId        = pedido.clienteId || pedido.clientId || null;
       nomeProfissional = user.nome || user.name || "Um profissional";
 
-      // ✅ Desconta R$1 (não R$3)
+      // Garante chatId — SEMPRE igual ao pedidoId, pra bater com a regra do
+      // Firestore. NUNCA gerar um id aleatório aqui — já causou permission-
+      // denied antes, exatamente por desalinhar do que a regra espera.
+      const chatId  = pedido.chatId || pedidoId;
+      const chatRef = db.collection("chats").doc(chatId);
+
+      // ── FASE DE ESCRITA ──
+
+      // ✅ Desconta R$1
       t.update(userRef, { balance: saldo - 1 });
-
-      // Garante chatId
-      let chatId = pedido.chatId;
-      const chatNovo = !chatId;
-      if (!chatId) chatId = db.collection("chats").doc().id;
-
-      // Grava quem participa do chat — a regra do Firestore usa isso pra
-      // garantir que só cliente e profissional deste pedido possam ler/escrever.
-      if (chatNovo) {
-        t.set(db.collection("chats").doc(chatId), {
-          clienteId:  clienteId,
-          providerId: userId,
-          criadoEm:   admin.firestore.FieldValue.serverTimestamp(),
-        });
-      }
 
       // Atualiza pedido
       t.update(pedidoRef, {
@@ -130,6 +124,22 @@ router.post("/desbloquear", verificarToken, async (req, res) => {
         chatId:     chatId,
         acceptedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+
+      // ⭐ O documento do CHAT também precisa saber quem é o providerId —
+      // é ele (e não o campo em "requests") que a regra do Firestore
+      // confere pra liberar o profissional a ler/escrever no chat e nas
+      // mensagens. Sem isso, o profissional cai em permission-denied e a
+      // tela de chat trava/não abre ou não envia mensagem.
+      // set com merge:true funciona tanto se o chat já existir (criado lá
+      // na hora do pedido, sem profissional ainda) quanto se ainda não
+      // existir nenhum documento pra esse chatId — SEMPRE atualiza,
+      // diferente de uma versão anterior que só gravava se o chat fosse
+      // novo.
+      t.set(chatRef, {
+        clienteId:  clienteId,
+        providerId: userId,
+        pedidoId:   pedidoId,
+      }, { merge: true });
 
     });
 
