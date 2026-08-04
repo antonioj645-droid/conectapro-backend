@@ -19,6 +19,12 @@ const ASAAS_BASE_URL =
 
 const ASAAS_API_KEY = process.env.ASAAS_API_KEY;
 
+// Token secreto que a Asaas manda no header "asaas-access-token" de cada
+// chamada de webhook. Configurado no painel da Asaas E aqui no Render
+// (variável de ambiente ASAAS_WEBHOOK_TOKEN) — evita que qualquer pessoa
+// na internet chame nosso endpoint de webhook fingindo ser a Asaas.
+const ASAAS_WEBHOOK_TOKEN = process.env.ASAAS_WEBHOOK_TOKEN;
+
 const asaas = axios.create({
   baseURL: ASAAS_BASE_URL,
   headers: {
@@ -262,6 +268,56 @@ async function notificarPagamentoConfirmado(userId, valor) {
 }
 
 // ================================
+// Credita o saldo de um pagamento confirmado, uma única vez.
+// Usada tanto pelo polling (/verificar-pagamento) quanto pelo webhook —
+// assim o saldo é creditado seja lá qual dos dois "avisar" primeiro,
+// e nunca duas vezes (a transaction confere o status "CREDITADO").
+// ================================
+async function creditarPagamento(paymentId) {
+  let jaCreditadoAntes = true;
+  let userIdParaNotificar = null;
+  let valorParaNotificar = 0;
+
+  await db.runTransaction(async (t) => {
+    const pagRef = db.collection("pix_payments").doc(paymentId);
+    const pagDoc = await t.get(pagRef);
+
+    if (!pagDoc.exists) {
+      throw new Error("Pagamento não encontrado no registro interno.");
+    }
+
+    const pag = pagDoc.data();
+
+    if (pag.status === "CREDITADO") {
+      return;
+    }
+
+    const userRef = db.collection("users").doc(pag.userId);
+    const userDoc = await t.get(userRef);
+    const saldoAtual = (userDoc.data()?.balance || 0);
+
+    t.update(userRef, { balance: saldoAtual + pag.valor });
+    t.update(pagRef, {
+      status: "CREDITADO",
+      creditadoEm: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    jaCreditadoAntes = false;
+    userIdParaNotificar = pag.userId;
+    valorParaNotificar = pag.valor;
+  });
+
+  if (!jaCreditadoAntes) {
+    console.log("✅ [PIX] pagamento confirmado e creditado:", paymentId);
+    if (userIdParaNotificar) {
+      await notificarPagamentoConfirmado(userIdParaNotificar, valorParaNotificar);
+    }
+  }
+
+  return !jaCreditadoAntes;
+}
+
+// ================================
 // VERIFICAR STATUS (e creditar saldo, uma única vez)
 // ================================
 router.get("/verificar-pagamento/:id", verificarToken, async (req, res) => {
@@ -282,52 +338,58 @@ router.get("/verificar-pagamento/:id", verificarToken, async (req, res) => {
     const confirmado = status === "CONFIRMED" || status === "RECEIVED";
 
     if (confirmado) {
-      let jaCreditadoAntes = true;
-      let userIdParaNotificar = null;
-      let valorParaNotificar = 0;
-
-      await db.runTransaction(async (t) => {
-        const pagRef = db.collection("pix_payments").doc(paymentId);
-        const pagDoc = await t.get(pagRef);
-
-        if (!pagDoc.exists) {
-          throw new Error("Pagamento não encontrado no registro interno.");
-        }
-
-        const pag = pagDoc.data();
-
-        if (pag.status === "CREDITADO") {
-          return;
-        }
-
-        const userRef = db.collection("users").doc(pag.userId);
-        const userDoc = await t.get(userRef);
-        const saldoAtual = (userDoc.data()?.balance || 0);
-
-        t.update(userRef, { balance: saldoAtual + pag.valor });
-        t.update(pagRef, {
-          status: "CREDITADO",
-          creditadoEm: admin.firestore.FieldValue.serverTimestamp(),
-        });
-
-        jaCreditadoAntes = false;
-        userIdParaNotificar = pag.userId;
-        valorParaNotificar = pag.valor;
-      });
-
-      console.log("✅ [PIX] pagamento confirmado e creditado:", paymentId);
-
-      // Só notifica na primeira vez que credita, pra não mandar push duplicado
-      // caso o app chame esse endpoint várias vezes seguidas.
-      if (!jaCreditadoAntes && userIdParaNotificar) {
-        await notificarPagamentoConfirmado(userIdParaNotificar, valorParaNotificar);
-      }
+      await creditarPagamento(paymentId);
     }
 
     return res.json({ success: true, status });
   } catch (error) {
     console.error("❌ [PIX] erro ao verificar pagamento:", extrairErroAsaas(error));
     return res.json({ success: false });
+  }
+});
+
+// ================================
+// WEBHOOK DA ASAAS
+// Chamado automaticamente pela Asaas quando um pagamento muda de status —
+// não depende do app estar aberto nem do celular em primeiro plano.
+// Configurar no painel: Minha Conta > Integrações > Webhooks.
+// ================================
+router.post("/webhook", async (req, res) => {
+  // A Asaas manda esse header em toda chamada de webhook. Se não bater
+  // com o token configurado aqui no Render, ignoramos a chamada.
+  const tokenRecebido = req.headers["asaas-access-token"];
+  if (ASAAS_WEBHOOK_TOKEN && tokenRecebido !== ASAAS_WEBHOOK_TOKEN) {
+    console.warn("⚠️ [PIX] webhook recebido com token inválido");
+    return res.status(401).json({ success: false });
+  }
+
+  try {
+    const evento = req.body?.event;
+    const payment = req.body?.payment;
+    const paymentId = payment?.id;
+    const status = payment?.status;
+
+    console.log("ℹ️ [PIX] webhook recebido:", { evento, paymentId, status });
+
+    // Responde 200 rápido pra Asaas mesmo se não for um evento que nos
+    // interessa — ela reenvia (com backoff) se não receber 200, e não
+    // queremos ficar recebendo reenvios de eventos que a gente ignora.
+    if (!paymentId) {
+      return res.json({ success: true, ignorado: true });
+    }
+
+    const confirmado = status === "CONFIRMED" || status === "RECEIVED";
+    if (confirmado) {
+      await creditarPagamento(paymentId);
+    }
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error("❌ [PIX] erro ao processar webhook:", error.message);
+    // Mesmo em erro, respondemos 200 — se for um erro nosso (ex: doc não
+    // achado), reenviar o mesmo evento não vai resolver, e não queremos
+    // travar a fila de webhooks da Asaas por um pagamento com problema.
+    return res.status(200).json({ success: false });
   }
 });
 
