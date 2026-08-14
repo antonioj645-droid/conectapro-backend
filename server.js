@@ -16,6 +16,8 @@ app.set('trust proxy', 1);
 const origensPermitidas = [
   'https://conectapro-ff6d5.web.app',
   'https://conectapro-ff6d5.firebaseapp.com', // domínio alternativo padrão do Firebase Hosting
+  'https://conectaproplus.com.br', // domínio próprio comprado pelo ConectaPro+
+  'https://www.conectaproplus.com.br', // versão com "www" do domínio próprio
 ];
 
 // `flutter run -d chrome` abre em localhost com uma porta aleatória a cada
