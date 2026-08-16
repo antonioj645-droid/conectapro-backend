@@ -85,15 +85,11 @@ router.post("/finalizar-servico/:pedidoId", async (req, res) => {
   }
 
   const { pedidoId } = req.params;
-  const { codigo } = req.body;
 
   if (!pedidoId) {
     return res.status(400).json({ success: false, erro: "Pedido inválido" });
   }
 
-  if (!codigo || String(codigo).trim().length !== 4) {
-    return res.status(400).json({ success: false, erro: "Código de confirmação inválido" });
-  }
 
   try {
 
@@ -112,10 +108,6 @@ router.post("/finalizar-servico/:pedidoId", async (req, res) => {
       if (pedido.status === "concluido") throw new Error("Pedido já foi finalizado");
       if (!pedido.providerId)            throw new Error("Pedido ainda não tem profissional");
 
-      const codigoEsperado = String(pedido.codigoConfirmacao || "").trim();
-      if (!codigoEsperado || String(codigo).trim() !== codigoEsperado) {
-        throw new Error("Código de confirmação incorreto");
-      }
 
       const valorServico = pedido.valorServico || pedido.valor || 0;
       if (!valorServico || valorServico <= 0) throw new Error("Valor do serviço não definido");
